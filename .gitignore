@@ -27,9 +27,10 @@ wheels/
 .scrapy/
 *.log
 
-# 数据文件
-data/
-*.json
+# 数据文件（保留测试数据，排除大型文件）
+data/files/
+!data/files/*.json
+data/files/index/
 *.pdf
 *.doc
 *.docx
@@ -49,6 +50,9 @@ Thumbs.db
 
 # HBase
 hbase/
+hbase-config/
+hbase-data/
+zookeeper-data/
 
 # 环境变量
 .env

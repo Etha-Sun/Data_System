@@ -108,14 +108,20 @@ class Searcher:
         # 找到包含查询词的文档
         candidate_docs = set()
         for token in query_tokens:
+            found = False
             # 从倒排索引查找（如果已加载）
             if token in self.inverted_index:
                 candidate_docs.update(self.inverted_index[token].keys())
-            else:
-                # 如果没有倒排索引，遍历所有文档
-                for doc_id, tokens in self.doc_tokens.items():
-                    if token in tokens:
-                        candidate_docs.add(doc_id)
+                found = True
+
+            # 即使有倒排索引，也要检查复合词匹配
+            # 遍历所有文档，检查是否包含查询词（作为子串）
+            for doc_id, tokens in self.doc_tokens.items():
+                doc = self.documents[doc_id]
+                # 检查标题和内容是否包含查询词
+                if (token in doc.title or token in doc.content or
+                    any(token in doc_token for doc_token in tokens)):
+                    candidate_docs.add(doc_id)
         
         if not candidate_docs:
             return []

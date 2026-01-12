@@ -2,7 +2,6 @@
 """
 运行爬虫脚本
 """
-import os
 import sys
 from pathlib import Path
 
@@ -10,16 +9,32 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-# 切换到crawler目录（Scrapy项目目录）
-crawler_dir = project_root / 'crawler'
-os.chdir(crawler_dir)
+def run_spider():
+    """
+    直接运行爬虫，不使用scrapy命令
+    """
+    from scrapy.crawler import CrawlerProcess
+    from scrapy.utils.project import get_project_settings
+    from crawler.spiders.ustc_spider import UstcSpider
 
-# 运行Scrapy爬虫
-from scrapy.cmdline import execute
+    # 获取爬虫设置
+    settings = get_project_settings()
+    settings.set('SCRAPY_SETTINGS_MODULE', 'crawler.settings')
+
+    # 创建爬虫进程
+    process = CrawlerProcess(settings)
+
+    # 添加爬虫
+    process.crawl(UstcSpider)
+
+    # 启动爬虫
+    print("=" * 50)
+    print("开始运行爬虫...")
+    print("=" * 50)
+
+    process.start()
 
 if __name__ == '__main__':
-    # 设置Scrapy项目设置
-    os.environ.setdefault('SCRAPY_SETTINGS_MODULE', 'crawler.settings')
-    execute(['scrapy', 'crawl', 'ustc_spider'])
+    run_spider()
 
 

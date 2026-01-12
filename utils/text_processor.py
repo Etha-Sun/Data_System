@@ -28,12 +28,26 @@ def extract_text_from_html(html: str) -> str:
     从HTML中提取纯文本
     """
     from bs4 import BeautifulSoup
-    
+    import re
+
+    # 尝试检测编码，如果是bytes，先解码
+    if isinstance(html, bytes):
+        # 尝试多种编码
+        for encoding in ['utf-8', 'gbk', 'gb2312', 'iso-8859-1']:
+            try:
+                html = html.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            # 如果都失败，使用errors='ignore'
+            html = html.decode('utf-8', errors='ignore')
+
     soup = BeautifulSoup(html, 'lxml')
     # 移除script和style标签
     for script in soup(["script", "style"]):
         script.decompose()
-    
+
     text = soup.get_text()
     return clean_text(text)
 
