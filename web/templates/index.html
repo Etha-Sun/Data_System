@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中科大校内文件搜索引擎</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .search-box {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+        }
+        
+        .search-form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .search-input {
+            flex: 1;
+            padding: 15px 20px;
+            font-size: 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        
+        .search-input:focus {
+            border-color: #667eea;
+        }
+        
+        .search-btn {
+            padding: 15px 30px;
+            font-size: 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .search-btn:hover {
+            background: #5568d3;
+        }
+        
+        .search-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .filter-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .filter-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .filter-item label {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .filter-item select {
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .results {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            min-height: 200px;
+        }
+        
+        .results-header {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        .results-count {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .result-item {
+            padding: 20px;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.3s;
+        }
+        
+        .result-item:hover {
+            background: #f9f9f9;
+        }
+        
+        .result-item:last-child {
+            border-bottom: none;
+        }
+        
+        .result-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .result-title a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        
+        .result-title a:hover {
+            text-decoration: underline;
+        }
+        
+        .result-meta {
+            display: flex;
+            gap: 15px;
+            font-size: 12px;
+            color: #999;
+            margin-bottom: 10px;
+        }
+        
+        .result-content {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+        
+        .result-score {
+            display: inline-block;
+            padding: 2px 8px;
+            background: #f0f0f0;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 中科大校内文件搜索引擎</h1>
+            <p>搜索中科大各学院和管理部门的文件和文档</p>
+        </div>
+        
+        <div class="search-box">
+            <form class="search-form" id="searchForm">
+                <input 
+                    type="text" 
+                    class="search-input" 
+                    id="searchInput" 
+                    placeholder="输入关键词搜索..."
+                    autocomplete="off"
+                >
+                <button type="submit" class="search-btn" id="searchBtn">搜索</button>
+            </form>
+            
+            <div class="filter-group">
+                <div class="filter-item">
+                    <label>来源网站：</label>
+                    <select id="sourceFilter">
+                        <option value="">全部</option>
+                    </select>
+                </div>
+                <div class="filter-item">
+                    <label>结果数量：</label>
+                    <select id="limitFilter">
+                        <option value="10">10</option>
+                        <option value="20" selected>20</option>
+                        <option value="50">50</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <div class="results" id="results">
+            <div class="no-results">请输入关键词开始搜索</div>
+        </div>
+    </div>
+    
+    <script>
+        // 加载来源列表
+        fetch('/sources')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const select = document.getElementById('sourceFilter');
+                    data.sources.forEach(source => {
+                        const option = document.createElement('option');
+                        option.value = source;
+                        option.textContent = source;
+                        select.appendChild(option);
+                    });
+                }
+            });
+        
+        // 搜索表单提交
+        document.getElementById('searchForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            performSearch();
+        });
+        
+        // 执行搜索
+        function performSearch() {
+            const query = document.getElementById('searchInput').value.trim();
+            const source = document.getElementById('sourceFilter').value;
+            const limit = document.getElementById('limitFilter').value;
+            
+            if (!query) {
+                alert('请输入搜索关键词');
+                return;
+            }
+            
+            const resultsDiv = document.getElementById('results');
+            const searchBtn = document.getElementById('searchBtn');
+            
+            // 显示加载状态
+            resultsDiv.innerHTML = '<div class="loading">搜索中...</div>';
+            searchBtn.disabled = true;
+            
+            // 发送搜索请求
+            fetch('/search', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    query: query,
+                    source: source,
+                    max_results: parseInt(limit)
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                searchBtn.disabled = false;
+                
+                if (!data.success) {
+                    resultsDiv.innerHTML = `<div class="error">${data.message || '搜索失败'}</div>`;
+                    return;
+                }
+                
+                if (data.results.length === 0) {
+                    resultsDiv.innerHTML = '<div class="no-results">未找到相关结果</div>';
+                    return;
+                }
+                
+                // 显示结果
+                let html = `
+                    <div class="results-header">
+                        <div class="results-count">找到 ${data.count} 条结果</div>
+                    </div>
+                `;
+                
+                data.results.forEach(result => {
+                    html += `
+                        <div class="result-item">
+                            <div class="result-title">
+                                <a href="${result.url}" target="_blank">${result.title || result.url}</a>
+                            </div>
+                            <div class="result-meta">
+                                <span>来源：${result.source}</span>
+                                <span>类型：${result.file_type}</span>
+                                ${result.file_size ? `<span>大小：${formatFileSize(result.file_size)}</span>` : ''}
+                                <span class="result-score">相关度：${result.score}</span>
+                            </div>
+                            <div class="result-content">${result.content || '无内容预览'}</div>
+                        </div>
+                    `;
+                });
+                
+                resultsDiv.innerHTML = html;
+            })
+            .catch(error => {
+                searchBtn.disabled = false;
+                resultsDiv.innerHTML = `<div class="error">搜索出错：${error.message}</div>`;
+            });
+        }
+        
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+    </script>
+</body>
+</html>
+
+
