@@ -3,6 +3,7 @@
 运行爬虫脚本
 """
 import sys
+import os
 from pathlib import Path
 
 # 添加项目根目录到路径
@@ -17,9 +18,10 @@ def run_spider():
     from scrapy.utils.project import get_project_settings
     from crawler.spiders.ustc_spider import UstcSpider
 
-    # 获取爬虫设置
+    # 显式指定环境变量，确保 scrapy 能找到设置
+    os.environ['SCRAPY_SETTINGS_MODULE'] = 'crawler.settings'
+    
     settings = get_project_settings()
-    settings.set('SCRAPY_SETTINGS_MODULE', 'crawler.settings')
 
     # 创建爬虫进程
     process = CrawlerProcess(settings)

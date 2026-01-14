@@ -132,29 +132,47 @@ class HBaseClient:
     
     def _save_to_hbase(self, doc: Document, row_key: str) -> str:
         """
-        保存到HBase
+        保存到HBase，带重试机制
         """
-        try:
-            table = self.connection.table(self.table_name)
-            
-            data = doc.to_dict()
-            
-            # 准备HBase数据
-            hbase_data = {}
-            for key, value in data.items():
-                if value:
-                    hbase_data[f'info:{key}'] = str(value).encode('utf-8')
-            
-            # 如果文件路径存在，可以存储文件信息
-            if doc.file_path:
-                hbase_data['info:file_path'] = doc.file_path.encode('utf-8')
-            
-            table.put(row_key.encode(), hbase_data)
-            return row_key
-        except Exception as e:
-            print(f"Error saving to HBase: {e}")
-            raise
-    
+        import time
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                if not self.connection:
+                    self._init_connection()
+                
+                table = self.connection.table(self.table_name)
+                
+                data = doc.to_dict()
+                
+                # 准备HBase数据
+                hbase_data = {}
+                for key, value in data.items():
+                    if value:
+                        hbase_data[f'info:{key}'] = str(value).encode('utf-8')
+                
+                # 如果文件路径存在，可以存储文件信息
+                if doc.file_path:
+                    hbase_data['info:file_path'] = doc.file_path.encode('utf-8')
+                
+                table.put(row_key.encode(), hbase_data)
+                return row_key
+            except Exception as e:
+                print(f"Error saving to HBase (attempt {attempt + 1}/{max_retries}): {e}")
+                
+                # 尝试重连
+                print("Attempting to reconnect to HBase...")
+                try:
+                    self.close()
+                    time.sleep(1) # 等待一秒再重连
+                    self._init_connection()
+                except Exception as reconnect_error:
+                    print(f"Reconnection failed: {reconnect_error}")
+                
+                # 如果是最后一次尝试，则抛出异常
+                if attempt == max_retries - 1:
+                    raise
+
     def _save_to_local(self, doc: Document, row_key: str) -> str:
         """
         保存到本地文件（JSON格式）
@@ -224,24 +242,75 @@ class HBaseClient:
         documents = []
         
         if self.use_hbase:
-            try:
-                table = self.connection.table(self.table_name)
-                count = 0
-                for key, data in table.scan():
-                    if limit and count >= limit:
-                        break
+            import time
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if not self.connection:
+                        self._init_connection()
                     
-                    row_data = {}
-                    for col_key, col_value in data.items():
-                        col_family, col_name = col_key.decode().split(':')
-                        if col_family == 'info':
-                            row_data[col_name] = col_value.decode('utf-8')
+                    table = self.connection.table(self.table_name)
+                    count = 0
+                    batch_size = 0
+                    last_key = None
                     
-                    doc = Document.from_dict(row_data)
-                    documents.append(doc)
-                    count += 1
-            except Exception as e:
-                print(f"Error scanning HBase: {e}")
+                    try:
+                        for key, data in table.scan():
+                            if limit and count >= limit:
+                                break
+                            
+                            try:
+                                row_data = {}
+                                for col_key, col_value in data.items():
+                                    col_family, col_name = col_key.decode().split(':')
+                                    if col_family == 'info':
+                                        row_data[col_name] = col_value.decode('utf-8')
+                                
+                                doc = Document.from_dict(row_data)
+                                documents.append(doc)
+                                count += 1
+                                batch_size += 1
+                                last_key = key
+                                
+                                # 每处理 1000 条打印一次进度
+                                if batch_size % 1000 == 0:
+                                    print(f"Loaded {batch_size} documents...")
+                            except Exception as row_error:
+                                print(f"Error processing row {key}: {row_error}")
+                                continue
+                        
+                        print(f"Successfully loaded {len(documents)} documents from HBase")
+                        # 如果加载的文档数量太少，可能是扫描提前中断了
+                        if len(documents) < 100 and attempt < max_retries - 1:
+                            print(f"Warning: Only {len(documents)} documents loaded, may be incomplete. Retrying...")
+                            documents = []  # 清空，准备重试
+                            raise Exception("Incomplete scan detected")
+                        
+                        break  # 成功则退出重试循环
+                    except (BrokenPipeError, ConnectionError, OSError) as scan_error:
+                        print(f"Connection error during scan (loaded {len(documents)} so far): {scan_error}")
+                        if attempt < max_retries - 1:
+                            # 如果已经加载了一些文档，先保存，然后重试
+                            if len(documents) > 0:
+                                print(f"Partial results: {len(documents)} documents, will retry for complete scan")
+                            documents = []  # 清空，准备完整重试
+                            raise  # 重新抛出异常，触发重连逻辑
+                        else:
+                            # 最后一次尝试，返回已加载的部分结果
+                            print(f"Returning partial results: {len(documents)} documents")
+                            break
+                except Exception as e:
+                    print(f"Error scanning HBase (attempt {attempt + 1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        print("Attempting to reconnect...")
+                        try:
+                            self.close()
+                            time.sleep(1)
+                            self._init_connection()
+                        except:
+                            pass
+                    else:
+                        print(f"Failed to load documents after {max_retries} attempts")
         else:
             # 从本地文件读取
             import json
@@ -268,19 +337,37 @@ class HBaseClient:
         保存倒排索引到HBase
         """
         if self.use_hbase:
-            try:
-                table = self.connection.table(self.index_table_name)
-                
-                # 存储文档ID列表和词频
-                data = {
-                    b'index:doc_ids': ','.join(doc_ids).encode('utf-8'),
-                    b'index:term_freq': str(term_freq).encode('utf-8'),
-                    b'index:doc_count': str(len(doc_ids)).encode('utf-8')
-                }
-                
-                table.put(term.encode(), data)
-            except Exception as e:
-                print(f"Error saving index to HBase: {e}")
+            import time
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    if not self.connection:
+                        self._init_connection()
+                        
+                    table = self.connection.table(self.index_table_name)
+                    
+                    # 存储文档ID列表和词频
+                    data = {
+                        b'index:doc_ids': ','.join(doc_ids).encode('utf-8'),
+                        b'index:term_freq': str(term_freq).encode('utf-8'),
+                        b'index:doc_count': str(len(doc_ids)).encode('utf-8')
+                    }
+                    
+                    table.put(term.encode(), data)
+                    break # 成功则退出循环
+                except Exception as e:
+                    print(f"Error saving index to HBase (attempt {attempt + 1}/{max_retries}): {e}")
+                    
+                    # 尝试重连
+                    try:
+                        self.close()
+                        time.sleep(1)
+                        self._init_connection()
+                    except:
+                        pass
+                        
+                    if attempt == max_retries - 1:
+                        print(f"Failed to save index for term: {term}")
         else:
             # 保存到本地文件
             import json
@@ -335,6 +422,7 @@ class HBaseClient:
         关闭连接
         """
         if self.connection:
-            self.connection.close()
-
-
+            try:
+                self.connection.close()
+            except:
+                pass
