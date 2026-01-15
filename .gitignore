@@ -58,3 +58,4 @@ zookeeper-data/
 .env
 
 
+*.tar.gz
