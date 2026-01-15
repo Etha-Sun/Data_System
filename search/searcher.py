@@ -51,16 +51,77 @@ class Searcher:
         """
         print("Loading index from storage...")
         
-        # 加载所有文档
-        all_docs = self.hbase_client.get_all_documents()
-        for doc in all_docs:
-            doc_id = self._generate_doc_id(doc.url)
-            self.documents[doc_id] = doc
+        # 加载所有文档，带重试机制
+        import time
+        max_retries = 5
+        expected_min_docs = 20000  # 期望至少加载这么多文档
         
-        # 加载倒排索引
-        # 由于HBase的限制，我们需要重新构建索引或使用其他方式存储
-        # 这里简化处理，在搜索时动态构建
-        print(f"Loaded {len(self.documents)} documents")
+        for attempt in range(max_retries):
+            try:
+                # 确保连接正常
+                if not self.hbase_client.use_hbase:
+                    print("HBase not available, using empty index")
+                    return
+                
+                if not self.hbase_client.connection:
+                    print("Reconnecting to HBase...")
+                    self.hbase_client.close()
+                    self.hbase_client = HBaseClient()
+                    time.sleep(2)
+                
+                print(f"Loading documents (attempt {attempt + 1}/{max_retries})...")
+                # 确保连接稳定
+                if not self.hbase_client.connection:
+                    print("Connection lost, reconnecting...")
+                    self.hbase_client._init_connection()
+                    time.sleep(1)
+                
+                all_docs = self.hbase_client.get_all_documents(limit=None)
+                print(f"get_all_documents returned {len(all_docs)} documents")
+                
+                if len(all_docs) < expected_min_docs:
+                    print(f"Warning: Only loaded {len(all_docs)} documents (expected at least {expected_min_docs}), retrying...")
+                    if attempt < max_retries - 1:
+                        time.sleep(3)
+                        # 重新初始化连接
+                        self.hbase_client.close()
+                        self.hbase_client = HBaseClient()
+                        continue
+                    else:
+                        print(f"Proceeding with {len(all_docs)} documents (less than expected)")
+                
+                # 成功加载，处理文档
+                print(f"Processing {len(all_docs)} documents into index...")
+                processed_count = 0
+                skipped_count = 0
+                for doc in all_docs:
+                    try:
+                        doc_id = self._generate_doc_id(doc.url)
+                        self.documents[doc_id] = doc
+                        processed_count += 1
+                    except Exception as e:
+                        print(f"Warning: Failed to process document {doc.url}: {e}")
+                        skipped_count += 1
+                        continue
+
+                print(f"Document processing complete: {processed_count} processed, {skipped_count} skipped")
+                
+                print(f"Successfully loaded {len(self.documents)} documents into search index")
+                break  # 成功则退出
+            except Exception as e:
+                print(f"Error loading documents (attempt {attempt + 1}/{max_retries}): {e}")
+                import traceback
+                traceback.print_exc()
+                if attempt < max_retries - 1:
+                    time.sleep(3)
+                    try:
+                        self.hbase_client.close()
+                    except:
+                        pass
+                    self.hbase_client = HBaseClient()
+                else:
+                    print("Failed to load documents after all retries")
+                    self.documents = {}  # 初始化为空，避免后续错误
     
     def _generate_doc_id(self, url: str) -> str:
         """
@@ -75,7 +136,9 @@ class Searcher:
         """
         if not self.doc_tokens:
             print("Building document tokens...")
-            for doc_id, doc in self.documents.items():
+            # 使用 list() 创建副本，避免在遍历时修改字典
+            doc_items = list(self.documents.items())
+            for doc_id, doc in doc_items:
                 title_tokens = self.tokenizer.tokenize_title(doc.title)
                 content_tokens = self.tokenizer.tokenize_content(doc.content)
                 self.doc_tokens[doc_id] = title_tokens + content_tokens
@@ -116,8 +179,12 @@ class Searcher:
 
             # 即使有倒排索引，也要检查复合词匹配
             # 遍历所有文档，检查是否包含查询词（作为子串）
-            for doc_id, tokens in self.doc_tokens.items():
-                doc = self.documents[doc_id]
+            # 使用 list() 创建副本，避免在遍历时修改字典
+            doc_tokens_items = list(self.doc_tokens.items())
+            for doc_id, tokens in doc_tokens_items:
+                doc = self.documents.get(doc_id)
+                if not doc:
+                    continue
                 # 检查标题和内容是否包含查询词
                 if (token in doc.title or token in doc.content or
                     any(token in doc_token for doc_token in tokens)):
